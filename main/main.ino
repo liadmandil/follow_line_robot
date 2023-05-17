@@ -1,10 +1,7 @@
 #include <NewPing.h>
 #include <Wire.h>
 #include <DRV8833.h>
-#include <SparkFun_APDS9960.h>
-#include <motor_handle.ino>
-#include <color_handle.ino>
-#include <blackLine_handle.ino>
+#include <Arduino_APDS9960.h>
 #define MIDDLE_SENSOR_BLACK_LINE      
 #define LEFT_SENSOR_BLACK_LINE
 #define RIGHT_SENSOR_BLACK_LINE
@@ -23,12 +20,13 @@
 #define BLUE_PIN_RGB
 #define BLACK_LINE_LIMIT 200        // limit to check if the robot lost track
 #define LEFT_MOTOR_BASE_SPEED
-#define RIGHT_MOTOR_BASE_SPEED
+#define RIGHT_MOTOR_BASE_SPEED 
 
 
-NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE); // NewPing setup of pins and maximum distance.
+
+HCSR04 hc(TRIGGER_PIN_ULTRASONIC, ECHO_PIN_ULTRASONIC); //initialisation class HCSR04 (trig pin , echo pin)
 SparkFun_APDS9960  color_sensor = SparkFun_APDS9960(); // color detection
-DRV8833 motor_shield = DRV8833();
+DRV8833 driver = DRV8833();
 
 
 //UltraSonic 
@@ -65,15 +63,14 @@ unsigned int min_90_degree_check_left = 1023;
 unsigned int max_90_degree_check_right = 0;
 unsigned int min_90_degree_check_right = 1023;
 
+unsigned int left_motor_speed = LEFT_MOTOR_BASE_SPEED
+unsigned int right_motor_speed = RIGHT_MOTOR_BASE_SPEED
 
-// pid for error handle
-float kd = 0;     // need to be fixed
-float kp = 0;   // need to be fixed
-int error = 0;
-// error < 0 robot go left
-// error > 0 robot go right 
 
 void setup() {
+  if (!APDS.begin()) {
+    Serial.println("Error initializing APDS-9960 sensor.");
+  }
   Serial.begin(9600);
   pinMode(MIDDLE_SENSOR_BLACK_LINE, INPUT_PULLUP);
   pinMode(LEFT_SENSOR_BLACK_LINE, INPUT_PULLUP);
@@ -82,8 +79,8 @@ void setup() {
   pinMode(RIGHT_SENSOR_BLLEFT_90_DEGREES_SENSOR_BLACK_LINEACK_LINE, INPUT_PULLUP);
   pinMode(TRIGGER_PIN_ULTRASONIC, OUTPUT);
   pinMode(ECHO_PIN_ULTRASONIC, INPUT_PULLUP);
-  motor_shield.attachMotorA(RIGHT_MOTOR_A_1, RIGHT_MOTOR_A_2);
-  motor_shield.attachMotorB(LEFT_MOTOR_B_1, LEFT_MOTOR_B_2);
+  driver.attachMotorA(RIGHT_MOTOR_A_1, RIGHT_MOTOR_A_2);
+  driver.attachMotorB(LEFT_MOTOR_B_1, LEFT_MOTOR_B_2);
 
   for(int i=0;i<500;i++){
     currentRight = analogRead(MIDDLE_SENSOR_BLACK_LINE);
@@ -103,13 +100,14 @@ void setup() {
     if(current_sensor_input_90_degree_left < min_90_degree_check_left) min_90_degree_check_left = current_sensor_input_90_degree_left;
     delay(20);
   }
-  motor_shield.motorAForward(MOTOR_BASE_SPEED);
-  motor_shield.motorBForward(MOTOR_BASE_SPEED);
+  driver.motorAForward(MOTOR_BASE_SPEED);
+  driver.motorBForward(MOTOR_BASE_SPEED);
 
 } 
 
 void loop() {
-  distance = sonar.ping_cm();
+  distance = hc.dist(); 
+  delay(40); 
   prev_middle_sensor_black_line = current_sensor_input_middle ;
   prev_left_sensor_black_line = current_sensor_input_left;
   prev_right_sensor_black_line = current_sensor_input_right;
@@ -123,18 +121,70 @@ void loop() {
   if(distance > 0 && distance < 15){
     stopMotors();
     showColorF();
+    while(distance > 0 && distance < 15){}
+
+    motorF(LEFT_MOTOR_BASE_SPEED, RIGHT_MOTOR_BASE_SPEED);
   }
   if (current_sensor_input_middle < BLACK_LINE_LIMIT){
-    if(check_prev_edgeF(current_sensor_input_90_degree_left, prev_left_check_90_degree_turn,current_sensor_input_90_degree_right, prev_left_check_90_degree_turn)){
-      /* function to go back to line */ 
+    if(check_prev_edgeF(current_sensor_input_90_degree_left, prev_left_check_90_degree_turn,current_sensor_input_90_degree_right, prev_left_check_90_degree_turn)){ 
   }
   if(current_sensor_input_right < BLACK_LINE_LIMIT){
-    error = error+1;
-    fix_drive_pidF(LEFT_MOTOR_BASE_SPEED, RIGHT_MOTOR_BASE_SPEED, error, error-1, kp, kd);
+    left_motor_speed ++;
+    right_motor_speed --;
+    motorF(left_motor_speed, right_motor_speed);
 
   }else if(current_sensor_input_left < BLACK_LINE_LIMIT){
-    error = error-1;
-    fix_drive_pidF(LEFT_MOTOR_BASE_SPEED, RIGHT_MOTOR_BASE_SPEED, error, error+1, kp, kd);
+    left_motor_speed --;
+    right_motor_speed +++;
+    motorF(left_motor_speed, right_motor_speed);
   }
 
 }
+void showColorF(){
+  APDS.readColor(red_light, green_light, blue_light);
+  if(red_light > 160 && blue_light < 100 && green_light < 100){
+    analogWrite(RED_PIN_RGB, 255);
+    analogWrite(GREEN_PIN_RGB,0);
+    analogWrite(BLUE_PIN_RGB,0);
+  }else if(blue_light > 160 && red_light < 100 && green_light < 100){
+    analogWrite(RED_PIN_RGB, 0);
+    analogWrite(GREEN_PIN_RGB,0);
+    analogWrite(BLUE_PIN_RGB,255);
+  } else if(green_light > 160 && blue_light < 100 && red_light < 100){
+    analogWrite(RED_PIN_RGB, 0);
+    analogWrite(GREEN_PIN_RGB,255);
+    analogWrite(BLUE_PIN_RGB,0);
+  }else if(red_light < 100 && blue_light < 100 && green_light < 100){
+    analogWrite(RED_PIN_RGB, 255);
+    analogWrite(GREEN_PIN_RGB,255);
+    analogWrite(BLUE_PIN_RGB,255);
+  }else{
+    for(int i = 0; i < 5; i++){
+    analogWrite(RED_PIN_RGB, 255);
+    analogWrite(GREEN_PIN_RGB,255);
+    analogWrite(BLUE_PIN_RGB,255);
+
+    delay(500);
+
+    analogWrite(RED_PIN_RGB, 0);
+    analogWrite(GREEN_PIN_RGB,0);
+    analogWrite(BLUE_PIN_RGB,0);
+    }
+  }
+}
+
+void motorF(left_speed, right_speed){
+  driver.motorAForward(left_speed);
+  driver.motorBForward(right_speed);
+}
+
+int check_prev_edgeF(left_90_current, left_90_prev, right_90_current, right_90_prev){
+  if(left_90_current > BLACK_LINE_LIMIT || left_90_prev > BLACK_LINE_LIMIT){
+    motorF(left_motor_speed - 30,right_motor_speed + 30);
+  }else if(right_90_current > BLACK_LINE_LIMIT || right_90_prev > BLACK_LINE_LIMIT){
+    motorF(left_motor_speed + 30,right_motor_speed - 30);
+  } else {
+    // keep going 
+  }
+}
+
